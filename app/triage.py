@@ -29,7 +29,7 @@ log = logging.getLogger("triage")
 CATEGORIES = ("delivery", "payment", "returns", "technical", "product", "other")
 PRIORITIES = ("low", "medium", "high", "urgent")
 
-TOTAL_BUDGET = 15.0   # с на весь triage(); жорсткий ліміт воркшопу — 20 с
+TOTAL_BUDGET = 17.0   # с на весь triage(); жорсткий ліміт воркшопу — 20 с
 MAX_MODEL_TRIES = 2   # перший виклик + один повтор, якщо відповідь не розібрати
 SUMMARY_MAX = 200
 

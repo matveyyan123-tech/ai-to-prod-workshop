@@ -31,16 +31,18 @@ log = logging.getLogger("triage.llm")
 MODEL = os.getenv("LLM_MODEL", "gemini-3.5-flash-lite")
 BASE_URL = os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
 
-PER_TRY_TIMEOUT = 7.0   # с на один HTTP-запит
-DEFAULT_BUDGET = 14.0   # с на весь виклик chat(), якщо дедлайн не передали
+PER_TRY_TIMEOUT = 9.0   # с на один HTTP-запит
+DEFAULT_BUDGET = 17.0   # с на весь виклик chat(), якщо дедлайн не передали
 MAX_ATTEMPTS = 5
 MIN_TRY_TIME = 1.0      # якщо лишилось менше — нового запиту вже не починаємо
 MAX_SLEEP = 3.0
 
 # Необов'язкові параметри в порядку «від найімовірніше непідтримуваного».
 # reasoning_effort=none — не платити токенами за «роздуми» там, де класифікація їх не потребує.
+_REASONING_VALUES = ["none", "minimal", "low"]  # пробуємо по черзі, поки сервер не прийме
+_reasoning_i = 0
 _OPTIONAL = [
-    ("reasoning_effort", "none"),
+    ("reasoning_effort", None),  # значення береться з _REASONING_VALUES
     ("response_format", {"type": "json_object"}),
     ("temperature", 0),
 ]
@@ -90,15 +92,21 @@ def _retry_after(exc: BaseException):
 
 
 def _drop_unsupported(exc: BaseException) -> bool:
-    """Після 400 вимикає один необов'язковий параметр. True, якщо було що вимикати."""
+    """Після 400 підлаштовує необов'язкові параметри. True, якщо є що пробувати ще раз."""
+    global _reasoning_i
     msg = str(exc).lower()
+    log.warning("LLM: 400 від сервера: %.300s", str(exc))
     active = [name for name, _ in _OPTIONAL if name not in _dropped]
     if not active:
         return False
     named = [n for n in active if n in msg or n.replace("_", " ") in msg]
     victim = named[0] if named else active[0]
+    if victim == "reasoning_effort" and _reasoning_i < len(_REASONING_VALUES) - 1:
+        _reasoning_i += 1  # можливо, не підходить саме значення — пробуємо наступне
+        log.warning("LLM: пробую reasoning_effort=%s", _REASONING_VALUES[_reasoning_i])
+        return True
     _dropped.add(victim)
-    log.warning("LLM: параметр %s не підтримується, вимикаю", victim)
+    log.warning("LLM: параметр %s вимкнено", victim)
     return True
 
 
@@ -135,6 +143,8 @@ def chat(messages, *, deadline: float | None = None, **kwargs) -> str:
             break
         timeout = max(1.0, min(PER_TRY_TIMEOUT, remaining - 0.3))
         params = {k: v for k, v in _OPTIONAL if k not in _dropped and k not in kwargs}
+        if "reasoning_effort" in params:
+            params["reasoning_effort"] = _REASONING_VALUES[_reasoning_i]
         params.update(kwargs)
         attempt += 1
         delay = 0.0

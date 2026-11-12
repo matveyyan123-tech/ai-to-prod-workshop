@@ -256,6 +256,7 @@ class FakeClient:
 def llm(monkeypatch):
     monkeypatch.setattr(llm_module.time, "sleep", lambda s: None)
     monkeypatch.setattr(llm_module, "_dropped", set())
+    monkeypatch.setattr(llm_module, "_reasoning_i", 0)
 
     def install(script):
         client = FakeClient(script)
@@ -303,9 +304,10 @@ def test_llm_does_not_retry_fatal_status(llm, status):
 
 
 def test_llm_unsupported_param_is_dropped_and_remembered(llm):
-    c = llm([FakeHTTPError(400), "OK"])
+    c = llm([FakeHTTPError(400)] * 3 + ["OK"])  # none → minimal → low → вимкнено
     assert llm_module.chat(MSGS) == "OK"
-    assert "reasoning_effort" in c.calls[0] and "reasoning_effort" not in c.calls[1]
+    assert [x.get("reasoning_effort") for x in c.calls[:3]] == ["none", "minimal", "low"]
+    assert "reasoning_effort" not in c.calls[3]
     assert llm_module.chat(MSGS) == "OK"
     assert "reasoning_effort" not in c.calls[-1]
 
@@ -314,7 +316,7 @@ def test_llm_bad_request_without_options_raises(llm):
     c = llm([FakeHTTPError(400)])
     with pytest.raises(llm_module.LLMError):
         llm_module.chat(MSGS)
-    assert len(c.calls) <= len(llm_module._OPTIONAL) + 1
+    assert len(c.calls) <= len(llm_module._OPTIONAL) + len(llm_module._REASONING_VALUES)
 
 
 def test_llm_respects_deadline(llm):
