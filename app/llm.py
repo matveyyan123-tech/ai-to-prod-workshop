@@ -31,7 +31,10 @@ log = logging.getLogger("triage.llm")
 MODEL = os.getenv("LLM_MODEL", "gemini-3.5-flash-lite")
 BASE_URL = os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
 
-PER_TRY_TIMEOUT = 9.0   # с на один HTTP-запит
+PER_TRY_TIMEOUT = 8.0   # максимум на один HTTP-запит
+# Таймаути наростають: «завислий» запит не має з'їдати весь бюджет, а повторний швидкий запит
+# часто проходить за 1-3 с. Останній запит має шанс дочекатися повільної, але живої відповіді.
+ATTEMPT_TIMEOUTS = (4.0, 5.5, 8.0)
 DEFAULT_BUDGET = 17.0   # с на весь виклик chat(), якщо дедлайн не передали
 MAX_ATTEMPTS = 5
 MIN_TRY_TIME = 1.0      # якщо лишилось менше — нового запиту вже не починаємо
@@ -141,12 +144,13 @@ def chat(messages, *, deadline: float | None = None, **kwargs) -> str:
         remaining = deadline - time.monotonic()
         if remaining < MIN_TRY_TIME:
             break
-        timeout = max(1.0, min(PER_TRY_TIMEOUT, remaining - 0.3))
         params = {k: v for k, v in _OPTIONAL if k not in _dropped and k not in kwargs}
         if "reasoning_effort" in params:
             params["reasoning_effort"] = _REASONING_VALUES[_reasoning_i]
         params.update(kwargs)
         attempt += 1
+        per_try = ATTEMPT_TIMEOUTS[min(attempt - 1, len(ATTEMPT_TIMEOUTS) - 1)]
+        timeout = max(1.0, min(per_try, PER_TRY_TIMEOUT, remaining - 0.3))
         delay = 0.0
         try:
             resp = client.chat.completions.create(model=MODEL, messages=messages, timeout=timeout, **params)

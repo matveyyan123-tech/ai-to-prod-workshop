@@ -331,3 +331,9 @@ def test_llm_passes_per_request_timeout(llm):
     c = llm(["OK"])
     llm_module.chat(MSGS)
     assert 0 < c.calls[0]["timeout"] <= llm_module.PER_TRY_TIMEOUT
+
+
+def test_llm_timeouts_escalate_between_attempts(llm):
+    c = llm([TimeoutError("t"), TimeoutError("t"), "OK"])
+    assert llm_module.chat(MSGS) == "OK"
+    assert [x["timeout"] for x in c.calls] == [4.0, 5.5, 8.0]
